@@ -1,0 +1,4 @@
+class XarError(Exception):
+    pass
+
+
