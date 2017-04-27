@@ -1,11 +1,16 @@
 import os
-from typing import List, Union, Generator
+import io
+from typing import List, Union, Generator, Tuple
 import datetime
 import zlib
+import gzip
+import hashlib
 from struct import *
 from collections import namedtuple
 from collections.abc import Container
 import xml.etree.ElementTree as ET
+
+from moxar.errors import XarError, XarChecksumError
 
 
 class XarInfo(object):
@@ -77,22 +82,51 @@ class XarInfo(object):
         else:
             return None
 
+    @property
+    def data(self) -> ET.Element:
+        return self._element.find('data')
+
+    @property
+    def data_encoding(self) -> str:
+        data = self._element.find('data')
+        encoding = data.find('encoding').attrib['style']
+        return encoding
+
+    @property
+    def data_archived_checksum(self) -> Tuple[str, str]:
+        """Get the item checksum as Algorithm, Value"""
+        data = self._element.find('data')
+        cksum = data.find('archived-checksum')
+        alg = cksum.attrib['style']
+        value = cksum.text
+
+        return alg, value
+
+
+    def heap_location(self) -> Tuple[int, int]:
+        """Get the heap location as length, offset"""
+        data = self._element.find('data')
+        length = int(data.findtext('length'))
+        offset = int(data.findtext('offset'))
+
+        return length, offset
+
     def isfile(self) -> bool:
         return self._element.find('type').text == 'file'
 
     def isdir(self) -> bool:
         return self._element.find('type').text == 'directory'
 
-    
-class XarSignature(object):
-
-    @property
-    def style(self) -> str:
-        return 'RSA'
-
-    @property
-    def certificates(self) -> List[x509.Certificate]:
-        pass
+#
+# class XarSignature(object):
+#
+#     @property
+#     def style(self) -> str:
+#         return 'RSA'
+#
+#     @property
+#     def certificates(self) -> List[x509.Certificate]:
+#         pass
 
 
 class XarExtendedSignature(object):
@@ -115,6 +149,7 @@ class XarFile(Container):
           
     See Also:
           - `xar archiver <https://en.wikipedia.org/wiki/Xar_%28archiver%29>`_.
+          - `mackyle/xar <https://github.com/mackyle/xar/wiki/xarformat>`_.
     """
 
     def __contains__(self, x):
@@ -131,10 +166,10 @@ class XarFile(Container):
     Header = Struct('>4sHHQQI')
 
     def __init__(self, path: str, toc: ET.Element, header: XarHeader):
-        self.path = path
+        self._path = path
         self._toc = toc
         self._header = header
-        self._heap_offset = header.size + header.toc_len_compressed
+        self._heap_offset = 28 + header.toc_len_compressed
 
     @property
     def toc(self):
@@ -149,28 +184,51 @@ class XarFile(Container):
               - `XML Signature <https://en.wikipedia.org/wiki/XML_Signature>`_.
         """
         signature_info = self._toc.find('signature')
-        
 
-    # def _extract_recurse(self, el: ET.Element, destination: str):
-    #     for entry in el.findall('file'):
-    #         etype = entry.find('type').text
-    #         ename = entry.find('name').text
-    #
-    #         if etype == 'directory':
-    #             os.mkdir(os.path.join(destination, ename))
-    #             self._extract_recurse(entry, os.path.join(destination, ename))
-    #         elif etype == 'file':
-    #             fn = os.path.join(destination, ename)
-    #             with open(fn, 'w+') as fd:
-    #
+    def _extract_xarinfo(self, xarinfo: XarInfo, destination_filename: str):
+        """Extract a file entry using a XarInfo instance."""
+        length, offset = xarinfo.heap_location()
+        with open(self._path, 'rb') as fd:
+            print(xarinfo.name)
+            print(self._heap_offset + offset)
+            fd.seek(self._heap_offset + offset, 0)  # not sure where my offset calc is incorrect
+            content = fd.read(length)
 
+        print(ET.tostring(xarinfo.data))
+        checksum_algorithm, checksum = xarinfo.data_archived_checksum
+        if checksum_algorithm == 'sha1':
+            d = hashlib.new('sha1')
+            d.update(content)
+            hexdigest = d.hexdigest()
+            if hexdigest != checksum:
+                raise XarChecksumError("Archived Checksum, Expected: {}, Got: {}".format(checksum, hexdigest))
 
+        if xarinfo.data_encoding == 'application/x-gzip':
+            gz = gzip.GzipFile(fileobj=io.BytesIO(content))
+            decompressed = zlib.decompress(content)
 
-    # def extract_all(self, destination: str):
-    #     if not os.path.exists(destination):
-    #         os.mkdir(destination)
-    #
-    #     self._extract_recurse(self._toc, destination)
+            with open(destination_filename, 'wb') as fd:
+                fd.write(decompressed)
+
+    def _extract_recursive(self, el: ET.Element, destination: str):
+        for entry in el.findall('file'):
+            xi = XarInfo.from_element(entry)
+
+            if xi.isdir():
+                os.mkdir(os.path.join(destination, xi.name))
+                self._extract_recursive(entry, os.path.join(destination, xi.name))
+            elif xi.isfile():
+                fn = os.path.join(destination, xi.name)
+                self._extract_xarinfo(xi, fn)
+            else:
+                raise XarError('Unhandled XAR Entry Type')
+
+    def extractall(self, path: str = "."):
+        """Extract all files from the archive to the desired destination."""
+        if not os.path.exists(path):
+            os.mkdir(path)
+
+        self._extract_recursive(self._toc.find('toc'), path)
 
     def extract(self, matching: str):
         pass

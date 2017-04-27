@@ -33,4 +33,4 @@ class TestBasic:
         print(ET.tostring(a.toc))
         names = a.getnames()
         print(names)
-        assert 'test.txt' in a
+        a.extractall('/tmp/od')
