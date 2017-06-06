@@ -223,7 +223,7 @@ class XarFile(object):
             else:
                 raise XarError('Unhandled XAR Entry Type')
 
-    def extractall(self, path: str = "."):
+    def extractall(self, path='.', members=None, *, numeric_owner=False):
         """Extract all files from the archive to the desired destination."""
         if not os.path.exists(path):
             os.mkdir(path)
