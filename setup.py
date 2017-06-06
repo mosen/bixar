@@ -1,13 +1,13 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="moxar",
+    name="bixar",
     version="0.1",
     description="Support for the XAR (Extensible Archive Format) Format",
-    packages=['moxar'],
+    packages=['bixar'],
     author="mosen",
     license="MIT",
-    url="https://github.com/mosen/moxar",
+    url="https://github.com/mosen/bixar",
     classifiers=[
         'Development Status :: 3 - Alpha',
         'License :: OSI Approved :: MIT License',
@@ -24,7 +24,7 @@ setup(
     setup_requires=['pytest-runner'],
     entry_points={
         'console_scripts': [
-            'moxar=moxar.cli:main',
+            'bixar=bixar.cli:main',
         ]
     },
     zip_safe=False

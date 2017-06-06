@@ -10,7 +10,7 @@ from collections import namedtuple
 from collections.abc import Container
 import xml.etree.ElementTree as ET
 
-from moxar.errors import XarError, XarChecksumError
+from bixar.errors import XarError, XarChecksumError
 
 
 class XarInfo(object):

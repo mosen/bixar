@@ -1,7 +1,7 @@
 import pytest
 import subprocess
 import os
-from moxar.archive import XarFile
+from bixar.archive import XarFile
 import xml.etree.ElementTree as ET
 
 @pytest.fixture(scope='module',
