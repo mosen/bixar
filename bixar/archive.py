@@ -1,13 +1,13 @@
+from __future__ import print_function
+from typing import List, Union, Generator, Tuple
 import os
 import io
-from typing import List, Union, Generator, Tuple
 import datetime
 import zlib
 import gzip
 import hashlib
 from struct import *
 from collections import namedtuple
-from collections.abc import Container
 import xml.etree.ElementTree as ET
 
 from bixar.errors import XarError, XarChecksumError
@@ -16,7 +16,7 @@ from bixar.errors import XarError, XarChecksumError
 class XarInfo(object):
     """Just like TarInfo, a XarInfo represents one member in a XarFile. It does not contain the file data."""
 
-    def __init__(self, name = ''):
+    def __init__(self, name=''):
         self._name = name
 
     @classmethod
@@ -65,7 +65,7 @@ class XarInfo(object):
             return int(self._element.find('gid').text)
         else:
             return None
-    
+
     @property
     def uname(self) -> Union[str, None]:
         user = self._element.find('user')
@@ -102,7 +102,6 @@ class XarInfo(object):
 
         return alg, value
 
-
     def heap_location(self) -> Tuple[int, int]:
         """Get the heap location as length, offset"""
         data = self._element.find('data')
@@ -116,6 +115,7 @@ class XarInfo(object):
 
     def isdir(self) -> bool:
         return self._element.find('type').text == 'directory'
+
 
 #
 # class XarSignature(object):
@@ -134,10 +134,10 @@ class XarExtendedSignature(object):
     pass
 
 
-
 XarHeader = namedtuple('XarHeader', 'magic size version toc_len_compressed toc_len_uncompressed cksumalg')
 
-class XarFile(Container):
+
+class XarFile(object):
     """XAR Archive
     
     This class is written in the style of TarFile
@@ -230,11 +230,22 @@ class XarFile(Container):
 
         self._extract_recursive(self._toc.find('toc'), path)
 
-    def extract(self, matching: str):
+    def extract(self, member, path="", set_attrs=True, *, numeric_owner=False):
         pass
 
+    def extractfile(self, member):
+        pass
+
+    def _getnames(self, element: ET.Element, prefix=''):
+        for f in element.findall('file'):
+            yield os.path.join(prefix, f.find('name').text)
+
+            if f.findtext('type') == 'directory':
+                for cf in self._getnames(f, prefix=prefix + f.findtext('name')):
+                    yield cf
+
     def getnames(self) -> List[str]:
-        return [m.name for m in self.getmembers()]
+        return [m for m in self._getnames(self._toc.find('toc'))]
 
     def _getmembers(self, element: ET.Element):
         for f in element.findall('file'):
@@ -248,12 +259,11 @@ class XarFile(Container):
         infos = []
 
         toc = self._toc.find('toc')
-        
+
         for m in self._getmembers(toc):
             infos.append(m)
 
         return infos
-
 
     @classmethod
     def is_xarfile(cls, name: str) -> bool:
@@ -263,16 +273,17 @@ class XarFile(Container):
             return magic == b'xar!'
 
     @classmethod
-    def open(cls, name: str) -> any:
-        with open(name, 'rb') as fd:
-            header = fd.read(28)  # The spec says the header must be at least 28
+    def open(cls, name=None, mode='r', fileobj=None) -> any:
+        if fileobj is None:
+            fileobj = open(name, mode)
 
-            if header[:4] != b'xar!':
-                raise ValueError('Not a XAR Archive')
+        header = fileobj.read(28)  # The spec says the header must be at least 28
 
-            hdr = XarHeader._make(XarFile.Header.unpack(header))
-            toc_compressed = fd.read(hdr.toc_len_compressed)
+        if header[:4] != b'xar!':
+            raise ValueError('Not a XAR Archive')
 
+        hdr = XarHeader._make(XarFile.Header.unpack(header))
+        toc_compressed = fileobj.read(hdr.toc_len_compressed)
         toc_uncompressed = zlib.decompress(toc_compressed)
 
         if len(toc_uncompressed) != hdr.toc_len_uncompressed:

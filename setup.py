@@ -15,6 +15,7 @@ setup(
     ],
     keywords='XAR',
     install_requires=[
+        'signxml>=2.3.0'
     ],
     python_requires='>=3.5',
     tests_require=[
