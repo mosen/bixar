@@ -10,7 +10,7 @@ from struct import *
 from collections import namedtuple
 import xml.etree.ElementTree as ET
 
-from bixar.errors import XarError, XarChecksumError
+from bixar.errors import XarError, XarChecksumError, XarFormatError
 
 
 class XarInfo(object):
@@ -37,6 +37,13 @@ class XarInfo(object):
     @property
     def size(self) -> int:
         return int(self._element.find('size').text)
+
+    @property
+    def atime(self) -> Union[datetime.datetime, None]:
+        if self._element.find('atime') is not None:
+            return datetime.datetime.strptime(self._element.find('atime').text, '%Y-%m-%dT%H:%M:%SZ')
+        else:
+            return None
 
     @property
     def mtime(self) -> Union[datetime.datetime, None]:
@@ -165,14 +172,30 @@ class XarFile(object):
 
     Header = Struct('>4sHHQQI')
 
-    def __init__(self, path: str, toc: ET.Element, header: XarHeader):
-        self._path = path
-        self._toc = toc
-        self._header = header
-        self._heap_offset = 28 + header.toc_len_compressed
+    def __init__(self, path=None, mode='r', fileobj=None):
+        if fileobj is None:
+            fileobj = open(path, mode)
+
+        header = fileobj.read(28)  # The spec says the header must be at least 28
+
+        if header[:4] != b'xar!':
+            raise XarFormatError('Not a XAR Archive')
+
+        hdr = XarHeader._make(XarFile.Header.unpack(header))
+        toc_compressed = fileobj.read(hdr.toc_len_compressed)
+        toc_uncompressed = zlib.decompress(toc_compressed)
+
+        if len(toc_uncompressed) != hdr.toc_len_uncompressed:
+            raise XarFormatError('Unexpected TOC Length does not match header')
+
+        self._toc = ET.fromstring(toc_uncompressed)
+        self._fd = fileobj
+        self._header = hdr
+        self._heap_offset = 28 + hdr.toc_len_compressed
 
     @property
     def toc(self):
+        """Access the TOC document represented by an xml.etree.ElementTree.Element."""
         return self._toc
 
     @property
@@ -188,11 +211,11 @@ class XarFile(object):
     def _extract_xarinfo(self, xarinfo: XarInfo, destination_filename: str):
         """Extract a file entry using a XarInfo instance."""
         length, offset = xarinfo.heap_location()
-        with open(self._path, 'rb') as fd:
-            print(xarinfo.name)
-            print(self._heap_offset + offset)
-            fd.seek(self._heap_offset + offset, 0)  # not sure where my offset calc is incorrect
-            content = fd.read(length)
+
+        print(xarinfo.name)
+        print(self._heap_offset + offset)
+        self._fd.seek(self._heap_offset + offset, 0)  # not sure where my offset calc is incorrect
+        content = self._fd.read(length)
 
         print(ET.tostring(xarinfo.data))
         checksum_algorithm, checksum = xarinfo.data_archived_checksum
@@ -209,6 +232,11 @@ class XarFile(object):
 
             with open(destination_filename, 'wb') as fd:
                 fd.write(decompressed)
+        elif xarinfo.data_encoding == 'application/octet-stream':
+            with open(destination_filename, 'wb') as fd:
+                fd.write(content)
+        else:
+            raise XarFormatError('Unhandled file compression algorithm: {}'.format(xarinfo.data_encoding))
 
     def _extract_recursive(self, el: ET.Element, destination: str):
         for entry in el.findall('file'):
@@ -223,18 +251,46 @@ class XarFile(object):
             else:
                 raise XarError('Unhandled XAR Entry Type')
 
+    def _set_attrs_recursive(self, el: ET.Element, destination: str):
+        for entry in el.findall('file'):
+            xi = XarInfo.from_element(entry)
+            abspath = os.path.join(destination, xi.name)
+
+            if xi.isdir():
+                if xi.atime is not None and xi.mtime is not None:
+                    os.utime(abspath, (xi.atime.timestamp(), xi.mtime.timestamp()))
+
+                if xi.uid is not None and xi.gid is not None:
+                    os.chown(abspath, xi.uid, xi.gid)
+
+                self._set_attrs_recursive(entry, abspath)
+            elif xi.isfile():
+                if xi.atime is not None and xi.mtime is not None:
+                    os.utime(abspath, (xi.atime.timestamp(), xi.mtime.timestamp()))
+
+                if xi.uid is not None and xi.gid is not None:
+                    os.chown(abspath, xi.uid, xi.gid)
+
+            else:
+                raise XarError('Unhandled XAR Entry Type')
+
     def extractall(self, path='.', members=None, *, numeric_owner=False):
         """Extract all files from the archive to the desired destination."""
         if not os.path.exists(path):
             os.mkdir(path)
 
+        if members is not None:
+            raise ValueError('Currently, this parameter is not implemented')
+        
         self._extract_recursive(self._toc.find('toc'), path)
+        self._set_attrs_recursive(self._toc.find('toc'), path)
 
-    def extract(self, member, path="", set_attrs=True, *, numeric_owner=False):
-        pass
 
-    def extractfile(self, member):
-        pass
+    # def extract(self, member, path="", set_attrs=True, *, numeric_owner=False):
+    #     pass
+    #
+    # def extractfile(self, member):
+    #     pass
 
     def _getnames(self, element: ET.Element, prefix=''):
         for f in element.findall('file'):
@@ -271,25 +327,3 @@ class XarFile(object):
         with open(name, 'rb') as fd:
             magic = fd.read(4)
             return magic == b'xar!'
-
-    @classmethod
-    def open(cls, name=None, mode='r', fileobj=None) -> any:
-        if fileobj is None:
-            fileobj = open(name, mode)
-
-        header = fileobj.read(28)  # The spec says the header must be at least 28
-
-        if header[:4] != b'xar!':
-            raise ValueError('Not a XAR Archive')
-
-        hdr = XarHeader._make(XarFile.Header.unpack(header))
-        toc_compressed = fileobj.read(hdr.toc_len_compressed)
-        toc_uncompressed = zlib.decompress(toc_compressed)
-
-        if len(toc_uncompressed) != hdr.toc_len_uncompressed:
-            raise ValueError('Unexpected TOC Length does not match header')
-
-        toc = ET.fromstring(toc_uncompressed)
-        result = XarFile(name, toc, hdr)
-
-        return result

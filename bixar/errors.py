@@ -3,6 +3,11 @@ class XarError(Exception):
     pass
 
 
+class XarFormatError(Exception):
+    """Raised when the format of the XAR isnt something we can handle."""
+    pass
+
+
 class XarChecksumError(Exception):
     """Raised when you attempt to extract a file with an invalid checksum."""
     pass
