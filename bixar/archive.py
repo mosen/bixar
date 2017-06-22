@@ -123,6 +123,8 @@ class XarInfo(object):
     def isdir(self) -> bool:
         return self._element.find('type').text == 'directory'
 
+    def xartype(self) -> str:
+        return self._element.findtext('type')
 
 #
 # class XarSignature(object):
@@ -248,8 +250,8 @@ class XarFile(object):
                 fn = os.path.join(destination, xi.name)
                 self._extract_xarinfo(xi, fn)
             else:
-                print('Warning: Unhandler XAR Entry')
-                #raise XarError('Unhandled XAR Entry Type')
+                print('Warning: Unhandled XAR Entry Type {}'.format(xi.xartype))
+
 
     def _set_attrs_recursive(self, el: ET.Element, destination: str):
         for entry in el.findall('file'):
