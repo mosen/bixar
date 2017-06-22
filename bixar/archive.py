@@ -174,7 +174,7 @@ class XarFile(object):
 
     Header = Struct('>4sHHQQI')
 
-    def __init__(self, path=None, mode='r', fileobj=None):
+    def __init__(self, path=None, mode='rb', fileobj=None):
         if fileobj is None:
             fileobj = open(path, mode)
 
