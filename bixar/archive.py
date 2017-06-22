@@ -338,8 +338,6 @@ class XarFile(object):
                     return match
             elif xi.isfile() and matching == abspath:
                 return xi
-            else:
-                raise XarError('Unhandled XAR Entry Type')
 
         return None
 
