@@ -208,16 +208,13 @@ class XarFile(object):
         """
         signature_info = self._toc.find('signature')
 
-    def _extract_xarinfo(self, xarinfo: XarInfo, destination_filename: str):
-        """Extract a file entry using a XarInfo instance."""
+    def _extract_xarinfo_bytes(self, xarinfo: XarInfo) -> bytes:
         length, offset = xarinfo.heap_location()
-
-        print(xarinfo.name)
-        print(self._heap_offset + offset)
+        # print(xarinfo.name)
+        # print(self._heap_offset + offset)
         self._fd.seek(self._heap_offset + offset, 0)  # not sure where my offset calc is incorrect
         content = self._fd.read(length)
-
-        print(ET.tostring(xarinfo.data))
+        # print(ET.tostring(xarinfo.data))
         checksum_algorithm, checksum = xarinfo.data_archived_checksum
         if checksum_algorithm == 'sha1':
             d = hashlib.new('sha1')
@@ -227,17 +224,19 @@ class XarFile(object):
                 raise XarChecksumError("Archived Checksum, Expected: {}, Got: {}".format(checksum, hexdigest))
 
         if xarinfo.data_encoding == 'application/x-gzip':
-            gz = gzip.GzipFile(fileobj=io.BytesIO(content))
             decompressed = zlib.decompress(content)
-
-            with open(destination_filename, 'wb') as fd:
-                fd.write(decompressed)
+            return decompressed
         elif xarinfo.data_encoding == 'application/octet-stream':
-            with open(destination_filename, 'wb') as fd:
-                fd.write(content)
+            return content.encode('utf8')
         else:
             raise XarFormatError('Unhandled file compression algorithm: {}'.format(xarinfo.data_encoding))
 
+    def _extract_xarinfo(self, xarinfo: XarInfo, destination_filename: str):
+        """Extract a file entry using a XarInfo instance."""
+        data = self._extract_xarinfo_bytes(xarinfo)
+        with open(destination_filename, 'wb') as fd:
+            fd.write(data)
+            
     def _extract_recursive(self, el: ET.Element, destination: str):
         for entry in el.findall('file'):
             xi = XarInfo.from_element(entry)
@@ -285,12 +284,16 @@ class XarFile(object):
         self._extract_recursive(self._toc.find('toc'), path)
         self._set_attrs_recursive(self._toc.find('toc'), path)
 
+    def extract_bytes(self, member: Union[XarInfo, str]) -> Union[None, bytes]:
+        """Extract the raw bytes of a single member within the XAR archive."""
+        if isinstance(member, str):
+            found = self.getmember(member)
+            if not found:
+                return None
+            else:
+                member = found
 
-    # def extract(self, member, path="", set_attrs=True, *, numeric_owner=False):
-    #     pass
-    #
-    # def extractfile(self, member):
-    #     pass
+        return self._extract_xarinfo_bytes(member)
 
     def _getnames(self, element: ET.Element, prefix=''):
         for f in element.findall('file'):
@@ -320,6 +323,27 @@ class XarFile(object):
             infos.append(m)
 
         return infos
+
+    def _getmember_recursive(self, el: ET.Element, matching: str, path: str="") -> Union[XarInfo, None]:
+        for entry in el.findall('file'):
+            xi = XarInfo.from_element(entry)
+            abspath = os.path.join(path, xi.name)
+
+            if xi.isdir():
+                match = self._getmember_recursive(entry, matching, abspath)
+                if match is not None:
+                    return match
+            elif xi.isfile() and matching == abspath:
+                return xi
+            else:
+                raise XarError('Unhandled XAR Entry Type')
+
+        return None
+
+    def getmember(self, name: str) -> Union[XarInfo, None]:
+        """Get the member matching the absolute path given"""
+        toc = self._toc.find('toc')
+        return self._getmember_recursive(toc, name)
 
     @classmethod
     def is_xarfile(cls, name: str) -> bool:
