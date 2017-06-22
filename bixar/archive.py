@@ -248,7 +248,8 @@ class XarFile(object):
                 fn = os.path.join(destination, xi.name)
                 self._extract_xarinfo(xi, fn)
             else:
-                raise XarError('Unhandled XAR Entry Type')
+                print('Warning: Unhandler XAR Entry')
+                #raise XarError('Unhandled XAR Entry Type')
 
     def _set_attrs_recursive(self, el: ET.Element, destination: str):
         for entry in el.findall('file'):
