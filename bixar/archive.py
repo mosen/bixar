@@ -5,6 +5,7 @@ import io
 import datetime
 import zlib
 import gzip
+import bz2
 import hashlib
 from struct import *
 from collections import namedtuple
@@ -226,8 +227,9 @@ class XarFile(object):
                 raise XarChecksumError("Archived Checksum, Expected: {}, Got: {}".format(checksum, hexdigest))
 
         if xarinfo.data_encoding == 'application/x-gzip':
-            decompressed = zlib.decompress(content)
-            return decompressed
+            return zlib.decompress(content)
+        elif xarinfo.data_encoding == 'application/x-bzip2':
+            return bz2.decompress(content)
         elif xarinfo.data_encoding == 'application/octet-stream':
             return content.encode('utf8')
         else:
